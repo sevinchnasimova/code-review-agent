@@ -8,7 +8,7 @@ def doBinarySearch(array, target):
         elif target < array[mid]:
             r = mid - 1
         else:
-            return mid
+            return mid - 2
         
     return -1
 
