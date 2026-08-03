@@ -69,11 +69,11 @@ for turn in range(10):
         continue
 
     else:
-        # --- the model answered directly: no more tool calls, done! ---
+        # --- the model answered directly: no more tool calls, done ---
         print("\n--- FINAL REVIEW ---\n")
         print(response.text)
         break
 
 else:
-    # --- this is the FOR loop's else: only runs if we never hit `break` ---
+    # --- this is the for loop's else: only runs if we never hit `break` ---
     print("[agent ran out of turns without finishing]")
