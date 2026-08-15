@@ -1,5 +1,7 @@
 from google import genai
 from google.genai import types
+import os
+import time
 
 client = genai.Client()
 
@@ -10,70 +12,79 @@ def read_file(path: str) -> str:
             return f.read()
     except FileNotFoundError:
         return f"ERROR: no file found at '{path}'. Try a different filename."
-    
-
-import os
 
 def list_files() -> str:
     """List all files in the current project folder."""
     return "\n".join(os.listdir("."))
 
-diff = '''
-+def normalize(value):
-+    return clamp(value) / 100
-'''
+def review_diff(diff: str) -> str:
+    """Send a diff to the agent and return its final review as text."""
+    conversation = [
+        "You are a code reviewer. Review this diff. If you need to see "
+        "another file to judge it correctly, use list_files then read_file. "
+        "Do not read the same file twice. Stop and answer as soon as you "
+        "have enough information.\n\n" + diff
+    ]
+    already_read = set()
 
-conversation = [
-    "You are a code reviewer. The diff below calls functions defined in "
-    "OTHER files. First use list_files to see what files exist, then use "
-    "read_file tool to read the ones you actually need - do not read the "
-    "same file more than once. As soon as you have enough information, "
-    "stop calling tools and give your review.\n\n" + diff
-]
+    for turn in range(10):
+        time.sleep(12)  # stay under the free tier's per-minute limit
 
-for turn in range(10):
-
-    response = client.models.generate_content(
-        model="gemini-flash-latest",
-        contents=conversation,
-        config=types.GenerateContentConfig(
-            tools=[read_file, list_files],
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                disable=True
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=conversation,
+            config=types.GenerateContentConfig(
+                tools=[read_file, list_files],
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True
+                ),
             ),
-        ),
-    )
-
-    if response.function_calls:
-        # --- this is the "if" else's partner: the model wants a tool ---
-        call = response.function_calls[0]
-        print(f"[agent wants to read: {call.name}]")
-
-        if call.name == "read_file":
-            result = read_file(call.args["path"])
-        else:
-            result = list_files()
-
-        conversation.append(response.candidates[0].content)
-        conversation.append(
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_function_response(
-                        name=call.name,
-                        response={"result": result},
-                    )
-                ],
-            )
         )
-        continue
+
+        if response.function_calls:
+            # --- the model wants to use a tool ---
+            call = response.function_calls[0]
+            print(f"[agent wants to: {call.name}]")
+
+            if call.name == "read_file":
+                path = call.args["path"]
+                if path in already_read:
+                    result = (f"You already read '{path}'. Use what "
+                            f"you already have - do not request it again.")
+                else:
+                    result = read_file(path)
+                    already_read.add(path)
+            else:
+                result = list_files()
+
+            conversation.append(response.candidates[0].content)
+            conversation.append(
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_function_response(
+                            name=call.name,
+                            response={"result": result},
+                        )
+                    ],
+                )
+            )
+            continue
+
+        else:
+            # --- the model answered directly: no more tool calls, done! ---
+            print("\n--- FINAL REVIEW ---\n")
+            return response.text
 
     else:
-        # --- the model answered directly: no more tool calls, done ---
-        print("\n--- FINAL REVIEW ---\n")
-        print(response.text)
-        break
+        # --- ran out of turns without finishing ---
+        print("[agent ran out of turns without finishing]")
+        return "[agent ran out of turns without finishing]"
 
-else:
-    # --- this is the for loop's else: only runs if we never hit `break` ---
-    print("[agent ran out of turns without finishing]")
+
+if __name__ == "__main__":
+    diff = '''
++def normalize(value):
++   return clamp(value) / 100
+'''
+    print(review_diff(diff))
